@@ -12,12 +12,12 @@ import android.graphics.BitmapFactory;
 public class ImageBitmap {
 
 
-    public static  Bitmap decodeBitmapFromResource(Resources resources, int resId, int reqWidth, int reqHeight ){
+    public static  BitmapFactory.Options decodeBitmapFromResource(int reqWidth, int reqHeight ){
         BitmapFactory.Options options=new BitmapFactory.Options();
         options.inJustDecodeBounds=true;
         options.inSampleSize=dealInSampleSize(options,reqWidth,reqHeight);
         options.inJustDecodeBounds=false;
-       return BitmapFactory.decodeResource(resources,resId);
+       return options;
     }
 
 

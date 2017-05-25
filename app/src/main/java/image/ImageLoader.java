@@ -1,5 +1,6 @@
 package image;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -8,6 +9,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.util.LruCache;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.ImageView;
 
 import com.ct.imageutil.ImageBitmap;
@@ -49,11 +51,16 @@ public class ImageLoader {
 
     private Semaphore  mBackSemaphore=new Semaphore(0);
 
+
+    //用于对先进先出  后进先出的处理
+    private Semaphore  mRunnableSemaphore=new Semaphore(3);
+
     public static ImageLoader imageLoader;
 
 
     public Context context;
-    private ImageLoader(){
+    private ImageLoader(Context context){
+        this.context=context;
         int MaxCacheSize= (int) (Runtime.getRuntime().maxMemory()/4);
         mLruCache=new LruCache<String,Bitmap>(MaxCacheSize){
             @Override
@@ -71,6 +78,12 @@ public class ImageLoader {
                 mThreadHandler=new Handler(){
                     @Override
                     public void handleMessage(Message msg) {
+                        try {
+                            //阻塞住
+                            mRunnableSemaphore.acquire();
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                         threadpool.execute(getRunnable());
                     }
                 };
@@ -101,12 +114,11 @@ public class ImageLoader {
         }
         return null;
     }
-    public static  ImageLoader getInstance(){
+    public static  ImageLoader getInstance(Context context){
         if(imageLoader==null){
             synchronized (ImageLoader.class){
-
                 if(imageLoader==null){
-                    imageLoader=new ImageLoader();
+                    imageLoader=new ImageLoader(context.getApplicationContext());
                 }
             }
         }
@@ -146,7 +158,7 @@ public class ImageLoader {
             bean.imageview=imageView;
             bean.url=url;
             message.obj=bean;
-            mUIHandler.sendEmptyMessage(0x110);
+            mUIHandler.sendMessage(message);
         }else{
             addTask(new Runnable() {
                 @Override
@@ -154,19 +166,13 @@ public class ImageLoader {
                     //获得图片需要显示的大小
                     ImageSize imagesize=getImageSize(imageView);
                     //1.getImageViewSize;
-
                     //压缩图片
                     Bitmap bm=getSampledBitmap(imagesize.width,imagesize.height,url);
                     //把图片加入到缓存
                     addBitmapLrucache(url,bm);
-
-
-
+                    mRunnableSemaphore.release();
                 }
-
-
             });
-
         }
     }
 
@@ -182,17 +188,24 @@ public class ImageLoader {
 
     /**
      * 压缩bitmap
+     *
      * @param width
      * @param height
      * @param url
      * @return
      */
     private Bitmap getSampledBitmap(int width, int height, String url) {
-        return  null;
+        //TODO  准备压缩 bitmap
+        BitmapFactory.Options options= ImageBitmap.decodeBitmapFromResource(width,height);
+        options.inJustDecodeBounds=true;
+        options.inSampleSize=ImageBitmap.dealInSampleSize(options,width,height);
+        options.inJustDecodeBounds=false;
+        return BitmapFactory.decodeFile(url,options);
     }
 
     /**
      * 获取到图片的大小
+     * TODO  处理图片
      * @return
      */
     private ImageSize getImageSize(ImageView imageView) {
@@ -200,18 +213,26 @@ public class ImageLoader {
         if(width<=0){
            ViewGroup.LayoutParams lp= imageView.getLayoutParams();
             width=lp.width;
-
         }
-        if(width<=0){
-
-
+        if (width <= 0) {
+            WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            width = wm.getDefaultDisplay().getWidth();
         }
 
+        int height=imageView.getHeight();
+        if(height<=0){
+            ViewGroup.LayoutParams lp= imageView.getLayoutParams();
+            height=lp.height;
+        }
+        if (height <= 0) {
+            WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            height = wm.getDefaultDisplay().getHeight();
+        }
 
-
-
-
-     return  null;
+        ImageSize imageSize=new ImageSize();
+        imageSize.width=width;
+        imageSize.height=height;
+     return  imageSize;
     }
 
     /**
@@ -219,7 +240,7 @@ public class ImageLoader {
      * 对于并发操作就会带来影响。在这个程序中只有ui和后台的轮询线程  暂时不考虑这个问题。
      * @param runnable
      */
-    private  void addTask(Runnable runnable) {
+    private synchronized void addTask(Runnable runnable) {
         mLinkedList.add(runnable);
         if(mThreadHandler==null){
             try {
@@ -232,14 +253,6 @@ public class ImageLoader {
 
     }
 
-
-
-    private void compressImage(ImageView imageview){
-        
-
-
-
-    }
 
     /**
      * 从内存中去获取bitmap
